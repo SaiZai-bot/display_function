@@ -32,7 +32,8 @@ def initialize_database():
             date TEXT NOT NULL,
             category TEXT NOT NULL,
             item TEXT NOT NULL,
-            amount REAL NOT NULL
+            amount REAL NOT NULL,
+            total_spent REAL NOT NULL
         )
     ''')
 
@@ -43,8 +44,8 @@ def initialize_database():
     # Insert a default record if the table is empty
     if count == 0:
         cursor.execute('''
-            INSERT INTO expenses (date, category, item, amount)
-            VALUES ('List of Date','.','.','.')
+            INSERT INTO expenses (date, category, item, amount, total_spent)
+            VALUES ('List of Date','.','.','.','.')
         ''')
         print("Inserted default expense record.")
 
@@ -52,6 +53,7 @@ def initialize_database():
     conn.close()
 
     print("Database initialized successfully.")
+
 initialize_database()
 
 
@@ -206,20 +208,21 @@ def show_data():
         selected_date = values[0]
         details_window = tk.Toplevel(data_window)
         details_window.title(f"Expenses on {selected_date}")
-        details_window.geometry("800x800")
+        details_window.geometry("1000x800")
         details_window.configure(bg="white")
 
         # Treeview to show details
-        detail_tree = ttk.Treeview(details_window, columns=("Category", "Item", "Amount"), show="headings")
+        detail_tree = ttk.Treeview(details_window, columns=("Category", "Item", "Amount", "Total Spent"), show="headings")
         detail_tree.heading("Category", text="Category")
         detail_tree.heading("Item", text="Item")
         detail_tree.heading("Amount", text="Amount")
+        detail_tree.heading("Total Spent", text="Total Spent")
         detail_tree.pack(fill="both", expand=True)
 
         # Fetch expenses for the selected date
         conn = sqlite3.connect("input.db")
         cursor = conn.cursor()
-        cursor.execute("SELECT category, item, amount FROM expenses WHERE date = ?", (selected_date,))
+        cursor.execute("SELECT category, item, amount, total_spent FROM expenses WHERE date = ?", (selected_date,))
         records = cursor.fetchall()
         conn.close()
 
@@ -228,6 +231,9 @@ def show_data():
             detail_tree.insert("", "end", values=record)
 
         show_pie_chart(details_window, selected_date)
+
+
+
 
     # Function to delete all records for a selected date
     def delete_selected_date():
@@ -418,15 +424,14 @@ def create_expense_tracker_gui():
 
 
 # Functions for expense tracker
-
-def save_to_database(date, category, item, amount):
+def save_to_database(date, category, item, amount, total_spent):
     """Saves the given expense data to the database."""
     conn = sqlite3.connect(DATABASE_NAME)
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO expenses (date, category, item, amount)
-        VALUES (?, ?, ?, ?)
-    ''', (date, category, item, amount))
+        INSERT INTO expenses (date, category, item, amount, total_spent)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (date, category, item, amount, total_spent))
     conn.commit()
     conn.close()
 
@@ -440,7 +445,6 @@ def insert_data():
     category = category_combo.get()
     item = item_entry.get()
     amount = amount_entry.get()
-
 
     if date and category and item and amount:
         try:
@@ -456,63 +460,63 @@ def insert_data():
 
 
             update_total_label()  # Update budget balance
+            save_to_database(date, category, item, amount, total_amount)  # Save to database
+            reset_inputs()
 
-
-            save_to_database(date, category, item, amount)  # Save to database
-            reset_inputs()  # Reset input fields
         except ValueError:
             messagebox.showerror("Input Error", "Amount must be a number.")
     else:
         messagebox.showerror("Missing Data", "Please complete all fields before inserting.")
        
        
-
-
 def reset_inputs():
-    """Clears input fields for new entry."""
-    date_entry.set_date(None)  # Reset date field correctly
+    """Clears input fields but does NOT change the date (handled in next_day)."""
     category_combo.set("")  # Reset category selection
     item_entry.delete(0, tk.END)  # Clear item field
     amount_entry.delete(0, tk.END)  # Clear amount field
 
 
-def next_day():
-    """Progresses the day count, saves current data, resets table, and keeps total."""
-    global day_count, all_data, total_amount
 
+from datetime import timedelta
+
+def next_day():
+    """Progresses the day count, updates the date, and resets inputs."""
+    global day_count, all_data, total_amount
 
     # Check if there is at least one entry before proceeding
     if not tree.get_children():
         messagebox.showwarning("No Data Entered", "Please insert at least one expense before moving to the next day.")
         return
 
-
     # Save the current day's data
     day_data = []
     for item in tree.get_children():
         day_data.append(tree.item(item)["values"])  # Store row data
-   
+
     if day_data:
         all_data.append((f"Day {day_count}", day_data))  # Store with day label
 
-
-    if day_count == duration_days: # Display table and pie chart when duration is reached
+    if day_count == duration_days:  # Display table and pie chart when duration is reached
         all_expenses = [item for day, data in all_data for item in data]
         budget = [remaining_budget]  # For calculations
         display_table_Chart(all_expenses, budget)  # Display table and chart
         return
 
-
-    # Increment the day count
+    # ✅ Increment the day count
     day_count += 1
     day_label.config(text=f"Day {day_count}")
-   
+
+    # ✅ Increment the date by 1 day
+    current_date = date_entry.get_date()
+    new_date = current_date + timedelta(days=1)
+    date_entry.set_date(new_date)  # Update the date field
+
     # Clear the table for the new day
     tree.delete(*tree.get_children())
 
-
-    # Reset input fields
+    # Reset input fields (keeps new date)
     reset_inputs()
+
 
 
 def update_total_label():
@@ -520,6 +524,8 @@ def update_total_label():
     total_label.config(text=f"Total: {total_amount:.2f}")  # Format to 2 decimal places
     remaining_label.config(text=f" {remaining_budget:.2f}")  # Remove extra "Remaining:"
    
+
+
 def display_table_Chart(data, budget):  
     global chart_frame
 
@@ -609,7 +615,6 @@ def for_pie_chart(data):
 
 
     category_totals = {}
-
 
     for row in data:
         category = row[1]
@@ -731,11 +736,9 @@ def show_data():
         if not selected_item:
             return
 
-
         values = tree.item(selected_item, "values")
         if not values:
             return
-
 
         selected_date = values[0]
         details_window = tk.Toplevel(data_window)
@@ -743,28 +746,27 @@ def show_data():
         details_window.geometry("800x800")
         details_window.configure(bg="white")
 
-
         # Treeview to show details
-        detail_tree = ttk.Treeview(details_window, columns=("Category", "Item", "Amount"), show="headings")
+        detail_tree = ttk.Treeview(details_window, columns=("Category", "Item", "Amount", "Total Spent"), show="headings")
         detail_tree.heading("Category", text="Category")
         detail_tree.heading("Item", text="Item")
         detail_tree.heading("Amount", text="Amount")
+        detail_tree.heading("Total Spent", text="Total Spent")
         detail_tree.pack(fill="both", expand=True)
-
 
         # Fetch expenses for the selected date
         conn = sqlite3.connect("input.db")
         cursor = conn.cursor()
-        cursor.execute("SELECT category, item, amount FROM expenses WHERE date = ?", (selected_date,))
+        cursor.execute("SELECT category, item, amount, total_spent FROM expenses WHERE date = ?", (selected_date,))
         records = cursor.fetchall()
         conn.close()
 
 
-        # Insert expense records into the detail treeview
         for record in records:
             detail_tree.insert("", "end", values=record)
 
 
+        # Show the pie chart below
         show_pie_chart(details_window, selected_date)
 
 
@@ -841,11 +843,9 @@ def show_data():
 
 
 
-
 # Initialize the database
 initialize_database()
 
 
 # Start the application
 root.mainloop()
-
